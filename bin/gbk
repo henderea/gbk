@@ -1,0 +1,56 @@
+Signal.trap('SIGINT') {
+  Process.waitall
+  puts
+  exit 1
+}
+
+require 'yaml'
+require 'shellwords'
+require 'thor'
+require 'everyday_thor_util'
+require 'everyday-plugins'
+require 'everyday-cli-utils'
+
+EverydayThorUtil::SubCommandTypes.def_types(:command_ids, :flag, :command, :helper)
+EverydayThorUtil::SubCommandTypes.def_helper(:helper, :print_info)
+
+class DefaultCommands
+  extend Plugin
+
+  register(:command, id: :path, parent: nil, name: 'path', short_desc: 'path', desc: 'print out the path of the current file') { puts __FILE__ }
+
+  register(:command, id: :backup, parent: nil, name: 'backup', short_desc: 'backup [FILENAME]', desc: 'back up the gems currently installed (FILENAME is passed through date formatter)') { |filename = 'gems-%Y-%m-%d--%H-%M-%S.txt'|
+    fn = Shellwords.escape(DateTime.now.strftime(filename))
+    system("gem list >#{fn}")
+  }
+
+  register(:command, id: :restore, parent: nil, name: 'restore', short_desc: 'restore FILENAME', desc: 'restore the gems from a backup (version ignored)') { |filename|
+    filename = File.expand_path(filename)
+    unless File.exist?(filename)
+      puts "File '#{filename}' does not exist"
+      exit 1
+    end
+    data = IO.read(filename)
+    gems = data.gsub(/(\S+)\s+.+\n?/, '\1 ').trim.split(' ')
+    cnt = gems.count
+    gems.each_with_index { |g, i|
+      print "\r\e[2K#{i}/#{cnt} (#{'%.3f' % ((i.to_f / cnt.to_f) * 100.0)})"
+      output = `gem install #{g}`
+      unless $?.success?
+        puts
+        puts 'Error!'
+        puts output
+        exit 1
+      end
+    }
+    puts
+    puts 'Done'
+  }
+end
+
+root_command = Class.new(Thor)
+Plugins.get :command, root_command, nil
+
+EverydayThorUtil::SubCommandTypes.add_debugging(root_command, nil, 'debug')
+
+root_command.start(ARGV)
